@@ -1,0 +1,14 @@
+name: gnn-benchmark
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.10
+  - scipy
+  - matplotlib
+  - seaborn
+  - scikit-learn
+  - pip
+  - pip:
+    - numpy<2.0
+    - tensorflow[and-cuda]==2.14.0
