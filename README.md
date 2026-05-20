@@ -24,15 +24,21 @@ Implementation of the standard spectral-based graph convolution. It aggregates n
 *   **Key Feature:** Efficient neighborhood averaging with self-loops.
 *   **Best for:** General graph structure learning.
 
+![GCN Architecture](results/architecture-diagrams/gcn_architecture.png)
+
 ### 2. GraphSAGE
 A spatial-based approach that learns an aggregator function rather than fixed weights for each node.
 *   **Aggregator:** Max-pooling (identifies the most salient features among neighbors).
 *   **Residual Connection:** Concatenates node features with aggregated neighborhood features.
 
+![GraphSAGE Architecture](results/architecture-diagrams/sage_architecture.png)
+
 ### 3. Graph Attention Network (GAT)
 Utilizes multi-head self-attention mechanisms to assign different weights to different nodes in a neighborhood.
 *   **Attention Heads:** 8 heads for stable learning.
 *   **Flexibility:** Allows the model to focus on the most relevant atoms for the specific biological activity.
+
+![GAT Architecture](results/architecture-diagrams/gat_flat_architecture.png)
 
 ---
 
