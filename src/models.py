@@ -2,6 +2,23 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 
+
+def structural_node_mask(adj, dtype):
+    # @Marcos: no usar filas de atributos nulas para detectar padding: la
+    # augmentación puede ocultar un átomo real. La diagonal de la adyacencia
+    # conserva los self-loops solo de nodos estructuralmente presentes.
+    return tf.cast(tf.linalg.diag_part(adj) > 0, dtype)[..., tf.newaxis]
+
+
+def masked_global_mean(h, mask):
+    # @Marcos: no promediar sobre las 50 posiciones padded; el readout debe
+    # dividir solo entre átomos reales para no escalar el embedding por tamaño.
+    """Mean-pool node embeddings using only structurally present atoms."""
+    total = tf.reduce_sum(h * mask, axis=1)
+    num_nodes = tf.reduce_sum(mask, axis=1)
+    return total / tf.maximum(num_nodes, tf.ones_like(num_nodes))
+
+
 class GCNLayer(layers.Layer):
     def __init__(self, units, activation=None, use_bias=True, l2_reg=1e-4, **kwargs):
         super().__init__(**kwargs)
@@ -118,15 +135,14 @@ class GCN(keras.Model):
 
     def call(self, inputs, training=False):
         x, adj = inputs
-        mask = tf.cast(tf.reduce_sum(tf.abs(x), axis=-1, keepdims=True) > 0, tf.float32)
+        mask = structural_node_mask(adj, x.dtype)
         h = x
         for conv, ln in zip(self.convs, self.lns):
             h = conv(h, adj)
             h = ln(h)
             if training:
                 h = tf.nn.dropout(h, rate=self.dropout)
-        h = h * mask
-        x_pool = tf.reduce_mean(h, axis=1)
+        x_pool = masked_global_mean(h, mask)
         return self.dense(x_pool)
 
 class GraphSAGE(keras.Model):
@@ -139,15 +155,14 @@ class GraphSAGE(keras.Model):
 
     def call(self, inputs, training=False):
         x, adj = inputs
-        mask = tf.cast(tf.reduce_sum(tf.abs(x), axis=-1, keepdims=True) > 0, tf.float32)
+        mask = structural_node_mask(adj, x.dtype)
         h = x
         for conv, ln in zip(self.convs, self.lns):
             h = conv(h, adj)
             h = ln(h)
             if training:
                 h = tf.nn.dropout(h, rate=self.dropout)
-        h = h * mask
-        x_pool = tf.reduce_mean(h, axis=1)
+        x_pool = masked_global_mean(h, mask)
         return self.dense(x_pool)
 
 class GAT(keras.Model):
@@ -168,7 +183,7 @@ class GAT(keras.Model):
 
     def call(self, inputs, training=False):
         x, adj = inputs
-        mask = tf.cast(tf.reduce_sum(tf.abs(x), axis=-1, keepdims=True) > 0, tf.float32)
+        mask = structural_node_mask(adj, x.dtype)
         h = self.input_proj(x)
         for att, ln in zip(self.layers_att, self.layers_ln):
             h_att = att([h, adj], training=training)
@@ -176,6 +191,5 @@ class GAT(keras.Model):
                 h = ln(h_att + h)
             else:
                 h = ln(h_att)
-        h = h * mask
-        x_pool = tf.reduce_mean(h, axis=1)
+        x_pool = masked_global_mean(h, mask)
         return self.mlp(x_pool)

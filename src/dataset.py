@@ -14,18 +14,30 @@ def tf_random_augment(x, adj, mask_rate=0.1, drop_rate=0.1):
     """
     # Node attribute masking
     n_nodes = tf.shape(x)[0]
-    n_feats = tf.shape(x)[1]
     node_mask = tf.cast(tf.random.uniform((n_nodes, 1)) > mask_rate, tf.float32)
     x_aug = x * node_mask
 
     # Edge dropout (perturbation)
-    # We only drop existing edges. 
-    edge_mask = tf.cast(tf.random.uniform(tf.shape(adj)) > drop_rate, tf.float32)
-    adj_aug = adj * edge_mask
-    
-    # Re-normalize adjacency (Simplified GCN-style normalization)
-    # Adding self-loops and degree normalization
-    adj_aug = adj_aug + tf.eye(n_nodes)
+    # @Marcos: muestrear cada enlace solo una vez y reflejarlo evita convertir
+    # un grafo molecular no dirigido en dirigido; los self-loops existentes se
+    # conservan exactamente una vez antes de la nueva normalización.
+    # Recover the unweighted molecular topology, then sample each undirected
+    # edge only once from the upper triangle and mirror the decision.
+    topology = tf.cast(adj > 0, adj.dtype)
+    eye = tf.eye(n_nodes, dtype=adj.dtype)
+    upper_off_diagonal = tf.linalg.band_part(tf.ones_like(adj), 0, -1) - eye
+    sampled_upper = tf.cast(
+        tf.random.uniform(tf.shape(adj), dtype=adj.dtype) > drop_rate,
+        adj.dtype,
+    )
+    kept_upper = topology * upper_off_diagonal * sampled_upper
+    adj_aug = kept_upper + tf.transpose(kept_upper)
+
+    # Keep precisely the existing self-loops of real atoms; padded nodes have
+    # no diagonal entry and must remain disconnected.
+    adj_aug += tf.linalg.diag(tf.linalg.diag_part(topology))
+
+    # Re-normalize after applying the symmetric edge dropout.
     deg = tf.reduce_sum(adj_aug, axis=-1)
     deg_inv_sqrt = tf.where(deg > 0, tf.math.pow(deg, -0.5), 0.0)
     D_inv_sqrt = tf.linalg.diag(deg_inv_sqrt)

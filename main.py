@@ -1,3 +1,4 @@
+import argparse
 import os
 import json
 import numpy as np
@@ -7,8 +8,9 @@ from src.dataset import load_graphs
 from src.models import GCN, GraphSAGE, GAT
 from src.train import train_model
 
-def run_benchmark():
+def run_benchmark(seed=None):
     num_seeds = 10
+    seeds = range(num_seeds) if seed is None else [seed]
     embedding_size = 128
     learning_rate = 0.005
     num_classes = 1
@@ -28,23 +30,32 @@ def run_benchmark():
 
     for m_spec in models_to_test:
         name = m_spec["name"]
-        print(f"\nBenchmarking {name} across {num_seeds} seeds...")
+        print(f"\nBenchmarking {name} across {len(seeds)} seed(s)...")
         
         roc_aucs = []
         f1s = []
-        best_seed_auc = -1.0
+        best_seed_val_auc = -1.0
         
-        for seed in range(num_seeds):
+        for seed in seeds:
             tf.keras.backend.clear_session()
             tf.random.set_seed(seed)
             np.random.seed(seed)
             
             model = m_spec["class"](num_classes=num_classes, **m_spec["params"])
             
-            train_model(
+            history = train_model(
                 model, x_train, adj_train, y_train, x_val, adj_val, y_val,
                 lr=learning_rate, epochs=1000, patience=100, batch_size=32, model_name=f"{name}_seed_{seed}"
             )
+
+            # @Marcos: seleccionar pesos con el ROC-AUC de test filtraba
+            # información del conjunto reservado y sesgaba su evaluación.
+            # EarlyStopping ya restauró los mejores pesos por validación.
+            best_val_auc = max(history["val_roc_auc"])
+            if best_val_auc > best_seed_val_auc:
+                best_seed_val_auc = best_val_auc
+                os.makedirs("models/weights", exist_ok=True)
+                model.save_weights(f"models/weights/{name}.weights.h5")
             
             # Inference
             logits = model([x_test, adj_test], training=False)
@@ -57,11 +68,6 @@ def run_benchmark():
             roc_aucs.append(auc)
             f1s.append(f1)
             print(f"  Seed {seed}: ROC-AUC = {auc:.4f}, F1 = {f1:.4f}")
-            
-            if auc > best_seed_auc:
-                best_seed_auc = auc
-                os.makedirs("models/weights", exist_ok=True)
-                model.save_weights(f"models/weights/{name}.weights.h5")
             
         results[name] = {
             "roc_auc_mean": np.mean(roc_aucs),
@@ -82,5 +88,20 @@ def run_benchmark():
     with open("results/benchmark_results.json", "w") as f:
         json.dump(results, f, indent=4)
 
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train the BACE GNN benchmark")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Run only this random seed. Omit to benchmark the default 10 seeds (0-9).",
+    )
+    args = parser.parse_args()
+    if args.seed is not None and args.seed < 0:
+        parser.error("--seed must be a non-negative integer")
+    return args
+
+
 if __name__ == "__main__":
-    run_benchmark()
+    run_benchmark(seed=parse_args().seed)
